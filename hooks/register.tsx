@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { PotetoRun, PotetoTodo } from '../types'
+import type { PotetoAgent, PotetoRun, PotetoTodo } from '../types'
 
 const PANE = 'pstack-poteto'
 const STATUS_TOOL = 'mcp__pstack__poteto_status'
@@ -14,7 +14,7 @@ const REPORT = [
   '3. before your final reply, with every principle you applied (skill names, e.g. principle-model-the-domain).',
   'Read playbook and principle files with the Read tool.',
 ].join('\n')
-const EMPTY: PotetoRun = { isActive: false, doneMs: null, step: null, steps: [], stepIndex: null, playbook: null, principles: [], skills: [], agents: [], todos: [] }
+const EMPTY: PotetoRun = { isActive: false, doneMs: null, startedAt: null, isWaiting: false, step: null, steps: [], stepIndex: null, playbook: null, principles: [], skills: [], agents: [], todos: [] }
 
 const isOn = atom({ plugin: 'pstack', key: 'isOn' } as const, false)
 const run = atom({ plugin: 'pstack', key: 'run' } as const, EMPTY)
@@ -63,7 +63,8 @@ const modeSection = (root: string) => ({
 // The moment poteto-mode is invoked (typed as a skill, or read by the model under
 // sticky mode): fresh run, band back on screen, a toast and a status line entry.
 const engage = async ($: EngineInterface) => {
-  await update($, run, () => ({ ...EMPTY, isActive: true }))
+  const startedAt = await $.clock.now()
+  await update($, run, () => ({ ...EMPTY, isActive: true, startedAt }))
   await update($, isBandHidden, () => false)
   $.ui.toast('👑 poteto-mode engaged: picking a playbook')
   $.ui.status('👑 poteto-mode')
@@ -88,12 +89,22 @@ const progress = (r: PotetoRun) => {
   }
   if (r.steps.length > 0) {
     const i = r.stepIndex ?? 0
+    if (r.isWaiting) {
+      return { done: i, total: r.steps.length, label: `step ${i + 1}/${r.steps.length} · waiting for subagents`, current: `${i + 1}. ${r.steps[i] ?? ''}` }
+    }
     return { done: i, total: r.steps.length, label: `step ${i + 1}/${r.steps.length}`, current: `${i + 1}. ${r.steps[i] ?? ''}` }
   }
   const done = r.todos.filter(t => t.status === 'completed').length
   const current = r.todos.find(t => t.status === 'in_progress')?.content ?? r.step
 
   return { done, total: r.todos.length, label: `${done}/${r.todos.length}`, current }
+}
+
+const agentSummary = (r: PotetoRun) => {
+  const running = r.agents.filter(a => a.status === 'running').length
+  const done = r.agents.length - running
+  if (r.agents.length === 0) return '0 agents'
+  return running > 0 ? `◐ ${running} agent${running === 1 ? '' : 's'} running · ${done} done` : `${done} agent${done === 1 ? '' : 's'} done`
 }
 
 // `step` arrives as 3, "3", or "3. Plan the fix": a 1-based playbook step number.
@@ -210,6 +221,7 @@ export const register: Register = on => {
       ...r,
       isActive: true,
       doneMs: null,
+      isWaiting: false,
       stepIndex: n !== null && r.steps.length > 0 ? Math.min(n, r.steps.length) - 1 : r.stepIndex,
       step: typeof input.step === 'string' && n === null ? input.step : r.step,
       principles: principles.reduce(addOnce, r.principles),
@@ -262,9 +274,20 @@ export const register: Register = on => {
   })
 
   on('agent.spawn', async ($, e, next) => {
+    const spawned = await next(e)
+    const agentId = spawned.deny === undefined ? spawned.agentId ?? null : null
+    if (spawned.deny === undefined) {
+      const agent: PotetoAgent = { id: e.tool_use_id, agentId, type: e.subagentType, description: e.description, status: 'running' }
+      await update($, run, r => ({ ...r, agents: [...r.agents, agent].slice(-20) }))
+    }
+
+    return spawned
+  })
+
+  on('classic.SubagentStop', async ($, e, next) => {
     await update($, run, r => ({
       ...r,
-      agents: [...r.agents, { id: e.tool_use_id, type: e.subagentType, description: e.description }].slice(-20),
+      agents: r.agents.map(a => (a.agentId === e.agent_id ? { ...a, status: 'done' as const } : a)),
     }))
 
     return next(e)
@@ -274,12 +297,57 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     const r = await read($, run)
-    if (e.reason === 'answer' && r.isActive && r.playbook !== null && r.doneMs === null) {
-      await update($, run, cur => ({ ...cur, doneMs: e.durationMs, stepIndex: cur.steps.length > 0 ? cur.steps.length - 1 : cur.stepIndex }))
-      $.ui.status(`👑 poteto-mode · ${r.playbook} ✔ done`)
+    if (e.reason !== 'answer' || !r.isActive || r.playbook === null || r.doneMs !== null) return result
+
+    // A background subagent is still working: the run resumes when it reports back.
+    if (r.agents.some(a => a.status === 'running')) {
+      await update($, run, cur => ({ ...cur, isWaiting: true }))
+      return result
     }
+    const now = await $.clock.now()
+    const doneMs = r.startedAt !== null ? now - r.startedAt : e.durationMs
+    await update($, run, cur => ({
+      ...cur,
+      doneMs,
+      isWaiting: false,
+      stepIndex: cur.steps.length > 0 ? cur.steps.length - 1 : cur.stepIndex,
+    }))
+    $.ui.status(`👑 poteto-mode · ${r.playbook} ✔ done`)
 
     return result
+  })
+
+  // The status tool's transcript row: one dim line in place of the MCP call and its "Band updated."
+  on('ui.render', { component: 'ToolUse', props: { tool: STATUS_TOOL } }, async ($, e, next) => {
+    if (e.props.isErrored) return next(e)
+    const { Text } = $.ui.resolve(e)
+    const input = e.props.input as { playbook?: unknown; step?: unknown }
+    const r = await read($, run)
+    const n = stepNumber(input.step)
+    const playbook = typeof input.playbook === 'string' ? input.playbook : r.playbook ?? '?'
+    const where =
+      n !== null && r.playbook === playbook && r.steps.length > 0
+        ? ` → step ${Math.min(n, r.steps.length)}/${r.steps.length} · ${r.steps[Math.min(n, r.steps.length) - 1] ?? ''}`
+        : n === null
+          ? ' · playbook picked'
+          : ` → step ${n}`
+
+    return (
+      <Text dimColor>
+        <Text color="warning">👑</Text> {playbook}
+        {where}
+      </Text>
+    )
+  })
+
+  // The animated line names the step while a poteto-mode run is in progress.
+  on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
+    const r = await read($, run)
+    if (!r.isActive || r.doneMs !== null || r.steps.length === 0 || r.stepIndex === null) return next(e)
+    const step = r.steps[r.stepIndex] ?? ''
+    const short = step.length > 48 ? `${step.slice(0, 47)}…` : step
+
+    return next({ ...e, props: { ...e.props, message: `${e.props.message ?? e.props.word} · 👑 ${r.stepIndex + 1}/${r.steps.length} ${short}` } })
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -309,7 +377,7 @@ export const register: Register = on => {
           )}
           <Text dimColor>
             {'  '}
-            {r.principles.length} principles · {r.agents.length} agents{' '}
+            {r.principles.length} principle{r.principles.length === 1 ? '' : 's'} · {agentSummary(r)}{' '}
           </Text>
           <Button key="pane" label="details" onPress={() => void $.ui.open({ id: PANE, title: '👑 poteto-mode' })} />
           <Button key="hide" label="hide" onPress={() => update($, isBandHidden, () => true)} />
@@ -363,9 +431,10 @@ export const register: Register = on => {
         <Text dimColor>{r.skills.join(', ') || '—'}</Text>
         <Text bold> </Text>
         <Text bold>Subagents ({r.agents.length})</Text>
+        {r.agents.length === 0 && <Text dimColor>—</Text>}
         {r.agents.map(a => (
-          <Text key={a.id} dimColor>
-            {a.type}: {a.description}
+          <Text key={a.id} color={a.status === 'running' ? 'warning' : undefined} dimColor={a.status === 'done'}>
+            {a.status === 'running' ? '◐' : '✔'} {a.type.replace(/^pstack:/, '')}: {a.description}
           </Text>
         ))}
       </Box>
