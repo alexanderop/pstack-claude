@@ -1,16 +1,17 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import type { PotetoRun, PotetoTodo } from '../types'
 
 const PANE = 'pstack-poteto'
-const EMPTY: PotetoRun = { playbook: null, principles: [], skills: [], agents: [], todos: [] }
+const EMPTY: PotetoRun = { isActive: false, playbook: null, principles: [], skills: [], agents: [], todos: [] }
 
 const isOn = atom({ plugin: 'pstack', key: 'isOn' } as const, false)
 const run = atom({ plugin: 'pstack', key: 'run' } as const, EMPTY)
 const isBandHidden = atom({ plugin: 'pstack', key: 'isBandHidden' } as const, false)
 
 const PLAYBOOK = /poteto-mode\/playbooks\/([\w-]+)\.md$/
+const MODE_SKILL = /skills\/poteto-mode\/SKILL\.md$/
 const PRINCIPLE = /skills\/(principle-[\w-]+)\/SKILL\.md$/
 
 const bare = (skill: string) => skill.replace(/^pstack:/, '')
@@ -35,6 +36,15 @@ const modeSection = (root: string) => ({
   ].join('\n'),
 })
 
+// The moment poteto-mode is invoked (typed as a skill, or read by the model under
+// sticky mode): fresh run, band back on screen, a toast and a status line entry.
+const engage = async ($: EngineInterface) => {
+  await update($, run, () => ({ ...EMPTY, isActive: true }))
+  await update($, isBandHidden, () => false)
+  $.ui.toast('👑 poteto-mode engaged: picking a playbook')
+  $.ui.status('👑 poteto-mode')
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -54,6 +64,7 @@ export const register: Register = on => {
     const arg = e.args.trim()
     if (arg === 'reset') {
       await update($, run, () => EMPTY)
+      $.ui.status(undefined)
       return { text: 'poteto-mode run cleared.' }
     }
     const next = arg === 'on' ? true : arg === 'off' ? false : !(await read($, isOn))
@@ -81,7 +92,7 @@ export const register: Register = on => {
   on('skill.prompt', async ($, e, next) => {
     const name = bare(e.skill)
     if (name === 'poteto-mode') {
-      await update($, run, () => EMPTY)
+      await engage($)
     } else {
       await update($, run, r => ({
         ...r,
@@ -96,8 +107,12 @@ export const register: Register = on => {
   on('tool.call', { tool: 'Read' }, async ($, e, next) => {
     const playbook = PLAYBOOK.exec(e.file_path)?.[1]
     const principle = PRINCIPLE.exec(e.file_path)?.[1]
+    if (MODE_SKILL.test(e.file_path) && !(await read($, run)).isActive) {
+      await engage($)
+    }
     if (playbook !== undefined && playbook !== 'opening-a-pr') {
       await update($, run, r => ({ ...r, playbook }))
+      $.ui.status(`👑 poteto-mode · ${playbook}`)
     }
     if (principle !== undefined) {
       await update($, run, r => ({ ...r, principles: addOnce(r.principles, principle) }))
@@ -153,7 +168,7 @@ export const register: Register = on => {
     const on_ = await read($, isOn)
     const r = await read($, run)
     const hasRun = r.playbook !== null || r.todos.length > 0
-    if (e.props.hasSurvey || (await read($, isBandHidden)) || (!on_ && !hasRun)) return next(e)
+    if (e.props.hasSurvey || (await read($, isBandHidden)) || (!on_ && !r.isActive && !hasRun)) return next(e)
 
     const { Box, Button, Text } = $.ui.resolve(e)
     const done = r.todos.filter(t => t.status === 'completed').length
@@ -165,7 +180,7 @@ export const register: Register = on => {
           👑 poteto{on_ ? '' : ' (off)'}
         </Text>
         <Text dimColor> · </Text>
-        <Text color="suggestion">{r.playbook ?? 'no playbook yet'}</Text>
+        <Text color="suggestion">{r.playbook ?? (r.isActive ? 'engaged · picking a playbook…' : 'no playbook yet')}</Text>
         {r.todos.length > 0 && (
           <Text>
             {'  '}

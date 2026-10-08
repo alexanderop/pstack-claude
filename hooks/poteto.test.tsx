@@ -38,3 +38,15 @@ test('the band shows the playbook and step progress', async ($, on) => {
     await ui.unmount()
   }
 })
+
+test('invoking poteto-mode shows the band at once, before any playbook', async ($, on) => {
+  on('skill.prompt', ($, e) => ({ text: e.text }))
+
+  await $.skill.prompt({ skill: 'pstack:poteto-mode', text: 'poteto mode' })
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'pstack', surface, component: 'AbovePrompt', props: { hasSurvey: false } as never })
+    expect(await ui.find({ type: 'Text', text: /picking a playbook/ })).toBeDefined()
+    await ui.unmount()
+  }
+})

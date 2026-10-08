@@ -1,3 +1,45 @@
+# pstack for Claude Code
+
+An unofficial port of [poteto's pstack](https://github.com/cursor/plugins/tree/main/pstack) (MIT, by Lauren Tan) from Cursor to Claude Code. The skills, playbooks, principles and agents are upstream's, with Cursor-only names swapped for Claude Code ones. On top sits a Claude Code mod (`hooks/register.tsx`) that gives poteto-mode a sticky mode and a live view.
+
+## Install
+
+In a Claude Code terminal session:
+
+```
+/plugin install pstack --marketplace alexanderop/pstack-claude
+```
+
+Answer `y` to add the marketplace, then pick a scope.
+
+Let Claude read the plugin's playbooks without a prompt on every read: add the plugin's folder to `permissions.additionalDirectories` in `~/.claude/settings.json`. `claude plugin list` shows the folder under `Read from:`.
+
+## Use
+
+| Cursor | Claude Code |
+|---|---|
+| `/poteto-mode` + Enter (one message) | `/pstack:poteto-mode <task>` |
+| option+Enter (sticky mode) | `/poteto on`: poteto-mode's reminder goes into the system prompt every turn |
+| exit the mode | `/poteto off` |
+
+The moment poteto-mode is invoked (`/pstack:poteto-mode`, or the model reading it under sticky mode) a toast says `👑 poteto-mode engaged`, the status line shows `👑 poteto-mode`, and a band appears above the prompt. As the run goes on, the band shows the matched playbook, step progress from the todo list, principles read and subagents spawned:
+
+```
+👑 poteto · bug-fix  ■■■□□□□□□□ 1/3  4 principles · 2 agents · Root-cause  [details] [hide]
+```
+
+`[details]` or `/poteto-pane` opens a pane with the full step list. `/poteto reset` clears it.
+
+## Differences from the Cursor version
+
+- Subagents run on Claude models. Upstream's multi-model routing (code to Grok, judgment to Opus) and most `/setup-pstack` model choices do not apply.
+- Skills from Cursor's `cursor-team-kit` (`deslop`, `control-ui`, `control-cli`, `create-skill`) are not available.
+- Headless `claude -p` sessions have no todo tool, so the band shows no step progress there.
+
+---
+
+The upstream README follows.
+
 # pstack
 
 i'm [poteto](https://x.com/poteto). i'm not a president or ceo, but i've worked with millions of lines of code at Meta, Netflix, and Cursor. i'm also on the react core team where i help build and maintain react compiler.

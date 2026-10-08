@@ -5,6 +5,7 @@ export type PotetoTodo = { id: string; content: string; status: TodoStatus }
 export type PotetoAgent = { id: string; type: string; description: string }
 
 export type PotetoRun = {
+  isActive: boolean
   playbook: string | null
   principles: string[]
   skills: string[]
