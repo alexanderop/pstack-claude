@@ -1,0 +1,5 @@
+{
+  "name": "pstack",
+  "owner": { "name": "Alexander Opalic" },
+  "plugins": [{ "name": "pstack", "source": "./" }]
+}
