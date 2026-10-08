@@ -9,11 +9,11 @@ test('/poteto on makes poteto-mode sticky in the system prompt', async ($, on) =
   const before = await $.prompt.compose(MODEL)
   expect(before.sections.map(s => s.id)).toEqual(['intro'])
 
-  await $.command.run({ command: 'poteto', args: 'on' })
+  await $.command.run({ command: 'poteto', args: 'on' } as never)
   const after = await $.prompt.compose(MODEL)
   expect(after.sections.map(s => s.id)).toEqual(['intro', 'pstack:poteto-mode'])
 
-  await $.command.run({ command: 'poteto', args: 'off' })
+  await $.command.run({ command: 'poteto', args: 'off' } as never)
   const off = await $.prompt.compose(MODEL)
   expect(off.sections.map(s => s.id)).toEqual(['intro'])
 })
@@ -22,7 +22,7 @@ test('the band shows the playbook and step progress', async ($, on) => {
   mock.clock(on)
   on('tool.call', () => ({ result: {} as never }))
 
-  await $.command.run({ command: 'poteto', args: 'on' })
+  await $.command.run({ command: 'poteto', args: 'on' } as never)
   await $.tool.call({ tool: 'Read', file_path: '/x/pstack/skills/poteto-mode/playbooks/bug-fix.md' })
   await $.tool.call({
     tool: 'TodoWrite',
