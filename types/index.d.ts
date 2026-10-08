@@ -6,6 +6,7 @@ export type PotetoAgent = { id: string; type: string; description: string }
 
 export type PotetoRun = {
   isActive: boolean
+  step: string | null
   playbook: string | null
   principles: string[]
   skills: string[]

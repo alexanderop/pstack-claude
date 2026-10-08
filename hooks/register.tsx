@@ -4,7 +4,17 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { PotetoRun, PotetoTodo } from '../types'
 
 const PANE = 'pstack-poteto'
-const EMPTY: PotetoRun = { isActive: false, playbook: null, principles: [], skills: [], agents: [], todos: [] }
+const STATUS_TOOL = 'mcp__pstack__poteto_status'
+const REPORT = [
+  '',
+  '## Reporting progress (Claude Code)',
+  `The user watches a live band driven only by the \`${STATUS_TOOL}\` tool. Call it, every time:`,
+  '1. right after you pick a playbook (or "none: <reason>"),',
+  '2. at the start of each playbook step, with that step\'s text,',
+  '3. before your final reply, with every principle you applied (skill names, e.g. principle-model-the-domain).',
+  'Read playbook and principle files with the Read tool.',
+].join('\n')
+const EMPTY: PotetoRun = { isActive: false, step: null, playbook: null, principles: [], skills: [], agents: [], todos: [] }
 
 const isOn = atom({ plugin: 'pstack', key: 'isOn' } as const, false)
 const run = atom({ plugin: 'pstack', key: 'run' } as const, EMPTY)
@@ -33,6 +43,7 @@ const modeSection = (root: string) => ({
       'and open a todo list whose first items are that playbook\'s steps, copied verbatim.',
     `Principle and helper skills live at ${root}/skills/<name>/SKILL.md; read a leaf in full before citing it.`,
     'Spawn subagents as subagent_type "pstack:poteto-agent" (comment review: "pstack:comment-sicko").',
+    REPORT,
   ].join('\n'),
 })
 
@@ -51,6 +62,22 @@ export const register: Register = on => {
       name: 'poteto',
       description: 'Toggle sticky poteto-mode (on | off | reset)',
       argumentHint: 'on | off | reset',
+    })
+    await $.tool.register({
+      name: 'poteto_status',
+      description:
+        'Report poteto-mode progress to the user\'s live band: the matched playbook, principles applied, and the current step. ' +
+        'Call it when you pick a playbook and whenever the step or principles change.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          playbook: { type: 'string', description: 'Playbook file name without .md (bug-fix, feature, investigation, ...), or "none: <reason>"' },
+          principles: { type: 'array', items: { type: 'string' }, description: 'Principle skill names applied so far' },
+          step: { type: 'string', description: 'The playbook step you are on, verbatim' },
+        },
+        required: ['playbook'],
+      },
+      isDeferred: false,
     })
     await $.command.register({
       name: 'poteto-pane',
@@ -93,6 +120,7 @@ export const register: Register = on => {
     const name = bare(e.skill)
     if (name === 'poteto-mode') {
       await engage($)
+      return next({ ...e, text: e.text + REPORT })
     } else {
       await update($, run, r => ({
         ...r,
@@ -116,6 +144,32 @@ export const register: Register = on => {
     }
     if (principle !== undefined) {
       await update($, run, r => ({ ...r, principles: addOnce(r.principles, principle) }))
+    }
+
+    return next(e)
+  })
+
+  on('tool.call', { tool: STATUS_TOOL }, async ($, e) => {
+    const input = e as unknown as { playbook?: unknown; principles?: unknown; step?: unknown }
+    const playbook = typeof input.playbook === 'string' ? input.playbook : null
+    const principles = Array.isArray(input.principles) ? input.principles.filter((p): p is string => typeof p === 'string') : []
+    const step = typeof input.step === 'string' ? input.step : null
+    await update($, run, r => ({
+      ...r,
+      isActive: true,
+      playbook: playbook ?? r.playbook,
+      step: step ?? r.step,
+      principles: principles.reduce(addOnce, r.principles),
+    }))
+    if (playbook !== null) $.ui.status(`👑 poteto-mode · ${playbook}`)
+
+    return { result: 'Band updated.' }
+  })
+
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const playbook = /poteto-mode\/playbooks\/([\w-]+)\.md/.exec(e.command)?.[1]
+    if (playbook !== undefined && playbook !== 'opening-a-pr') {
+      await update($, run, r => ({ ...r, playbook }))
     }
 
     return next(e)
@@ -172,12 +226,12 @@ export const register: Register = on => {
 
     const { Box, Button, Text } = $.ui.resolve(e)
     const done = r.todos.filter(t => t.status === 'completed').length
-    const current = r.todos.find(t => t.status === 'in_progress')
+    const current = r.todos.find(t => t.status === 'in_progress')?.content ?? r.step
 
     return (
       <Box>
         <Text color="warning" bold>
-          👑 poteto{on_ ? '' : ' (off)'}
+          👑 poteto{on_ ? ' (sticky)' : ''}
         </Text>
         <Text dimColor> · </Text>
         <Text color="suggestion">{r.playbook ?? (r.isActive ? 'engaged · picking a playbook…' : 'no playbook yet')}</Text>
@@ -190,7 +244,7 @@ export const register: Register = on => {
         <Text dimColor>
           {'  '}
           {r.principles.length} principles · {r.agents.length} agents
-          {current ? ` · ${current.content.slice(0, 40)}` : ''}{' '}
+          {current ? ` · ${current.slice(0, 50)}` : ''}{' '}
         </Text>
         <Button key="pane" label="details" onPress={() => void $.ui.open({ id: PANE, title: '👑 poteto-mode' })} />
         <Button key="hide" label="hide" onPress={() => update($, isBandHidden, () => true)} />
@@ -208,6 +262,9 @@ export const register: Register = on => {
         <Text bold>Mode: {(await read($, isOn)) ? 'sticky ON' : 'off (/poteto on)'}</Text>
         <Text>
           Playbook: <Text color="suggestion">{r.playbook ?? '—'}</Text>
+        </Text>
+        <Text>
+          Step: <Text color="warning">{r.step ?? '—'}</Text>
         </Text>
         <Text bold> </Text>
         <Text bold>Steps</Text>
