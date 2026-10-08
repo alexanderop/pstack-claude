@@ -64,3 +64,18 @@ test('poteto_status step numbers walk the playbook steps the mod loaded', async 
     await ui.unmount()
   }
 })
+
+test('the band switches to done when the turn completes', async ($, on) => {
+  on('fs.read', () => ({ value: '1. One.\n2. Two.\n3. Three.\n' }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+
+  await $.tool.call({ tool: 'mcp__pstack__poteto_status', playbook: 'bug-fix', step: 2 } as never)
+  await $.turn.complete({ answer: 'fixed', durationMs: 40_000, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'pstack', surface, component: 'AbovePrompt', props: { hasSurvey: false } as never })
+    expect(await ui.find({ type: 'Text', text: /✔ done in 40s/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /■■■■■■■■■■/ })).toBeDefined()
+    await ui.unmount()
+  }
+})

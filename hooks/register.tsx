@@ -14,7 +14,7 @@ const REPORT = [
   '3. before your final reply, with every principle you applied (skill names, e.g. principle-model-the-domain).',
   'Read playbook and principle files with the Read tool.',
 ].join('\n')
-const EMPTY: PotetoRun = { isActive: false, step: null, steps: [], stepIndex: null, playbook: null, principles: [], skills: [], agents: [], todos: [] }
+const EMPTY: PotetoRun = { isActive: false, doneMs: null, step: null, steps: [], stepIndex: null, playbook: null, principles: [], skills: [], agents: [], todos: [] }
 
 const isOn = atom({ plugin: 'pstack', key: 'isOn' } as const, false)
 const run = atom({ plugin: 'pstack', key: 'run' } as const, EMPTY)
@@ -76,12 +76,16 @@ const setPlaybook = async ($: EngineInterface, playbook: string) => {
   const steps = await $.fs
     .read(`${$.plugin.root}/skills/poteto-mode/playbooks/${playbook}.md`)
     .then(parseSteps, () => [])
-  await update($, run, r => ({ ...r, isActive: true, playbook, steps, stepIndex: steps.length > 0 ? r.stepIndex ?? 0 : null }))
+  await update($, run, r => ({ ...r, isActive: true, doneMs: null, playbook, steps, stepIndex: steps.length > 0 ? r.stepIndex ?? 0 : null }))
   $.ui.status(`👑 poteto-mode · ${playbook}`)
 }
 
 // Playbook steps when the mod knows them, else the model's todo list.
 const progress = (r: PotetoRun) => {
+  if (r.doneMs !== null) {
+    const total = Math.max(r.steps.length, r.todos.length, 1)
+    return { done: total, total, label: `✔ done in ${Math.round(r.doneMs / 1000)}s`, current: null }
+  }
   if (r.steps.length > 0) {
     const i = r.stepIndex ?? 0
     return { done: i, total: r.steps.length, label: `step ${i + 1}/${r.steps.length}`, current: `${i + 1}. ${r.steps[i] ?? ''}` }
@@ -205,6 +209,7 @@ export const register: Register = on => {
     await update($, run, r => ({
       ...r,
       isActive: true,
+      doneMs: null,
       stepIndex: n !== null && r.steps.length > 0 ? Math.min(n, r.steps.length) - 1 : r.stepIndex,
       step: typeof input.step === 'string' && n === null ? input.step : r.step,
       principles: principles.reduce(addOnce, r.principles),
@@ -265,6 +270,18 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // The reply is out: the run is finished until the model reports again.
+  on('turn.complete', async ($, e, next) => {
+    const result = await next(e)
+    const r = await read($, run)
+    if (e.reason === 'answer' && r.isActive && r.playbook !== null && r.doneMs === null) {
+      await update($, run, cur => ({ ...cur, doneMs: e.durationMs, stepIndex: cur.steps.length > 0 ? cur.steps.length - 1 : cur.stepIndex }))
+      $.ui.status(`👑 poteto-mode · ${r.playbook} ✔ done`)
+    }
+
+    return result
+  })
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const on_ = await read($, isOn)
     const r = await read($, run)
@@ -315,6 +332,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Text bold>Mode: {(await read($, isOn)) ? 'sticky ON' : 'off (/poteto on)'}</Text>
+        {r.doneMs !== null && <Text color="success" bold>✔ Done in {Math.round(r.doneMs / 1000)}s</Text>}
         <Text>
           Playbook: <Text color="suggestion">{r.playbook ?? '—'}</Text>
         </Text>
@@ -323,7 +341,7 @@ export const register: Register = on => {
         {r.steps.length === 0 && <Text dimColor>Waiting for a playbook.</Text>}
         {r.steps.map((step, i) => {
           const i_ = r.stepIndex ?? 0
-          const state = i < i_ ? 'completed' : i === i_ ? 'in_progress' : 'pending'
+          const state = r.doneMs !== null || i < i_ ? 'completed' : i === i_ ? 'in_progress' : 'pending'
           return (
             <Text key={`s${i}`} color={state === 'in_progress' ? 'warning' : undefined} dimColor={state === 'completed'}>
               {mark[state]} {i + 1}. {step}
