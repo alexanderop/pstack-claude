@@ -50,3 +50,17 @@ test('invoking poteto-mode shows the band at once, before any playbook', async (
     await ui.unmount()
   }
 })
+
+test('poteto_status step numbers walk the playbook steps the mod loaded', async ($, on) => {
+  on('fs.read', () => ({ value: '### Bug fix\n\n1. Reproduce it. More text.\n2. Find the cause.\n3. Plan the fix.\n4. Verify it.\n' }))
+
+  await $.tool.call({ tool: 'mcp__pstack__poteto_status', playbook: 'bug-fix' } as never)
+  await $.tool.call({ tool: 'mcp__pstack__poteto_status', playbook: 'bug-fix', step: 3 } as never)
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'pstack', surface, component: 'AbovePrompt', props: { hasSurvey: false } as never })
+    expect(await ui.find({ type: 'Text', text: /step 3\/4/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /3\. Plan the fix\./ })).toBeDefined()
+    await ui.unmount()
+  }
+})
