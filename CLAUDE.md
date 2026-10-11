@@ -16,6 +16,8 @@ A Claude Code port of [poteto's pstack](https://github.com/cursor/plugins/tree/m
 | `.claude-plugin/marketplace.json` | Makes this repo a one-plugin marketplace |
 | `.claude-plugin/types/` | Generated API types, gitignored (see Type-check) |
 
+Upstream source and sync scope are recorded in `UPSTREAM.md`. The current port is `0.15.17-cc.1`.
+
 ## What the port changed from upstream
 
 Keep these when syncing from `cursor/plugins`:
@@ -65,10 +67,10 @@ Lists every hook and `$` call the engine sees. The "gating hook without .catch" 
 
 ```bash
 claude -p "/poteto off" --plugin-dir .
-tsc -p .
+tsc -p . --noEmit
 ```
 
-The first command loads the plugin from this folder, which writes `.claude-plugin/types/` (API, built-in tools, tsconfig). Re-run it after a Claude Code update. The installed plugin does **not** write these types.
+The first command loads the plugin from this folder. Check that `.claude-plugin/types/tsconfig.json` exists before type-checking. Some CLI builds do not emit the SDK declarations in a headless run. In that case, obtain them from an interactive load or reuse `.claude-plugin/types/` from an existing local installation, and record that reuse in the verification results. Refresh them after a Claude Code update.
 
 ### 3. Mod tests
 
@@ -77,6 +79,15 @@ claude plugin test .
 ```
 
 Expect `9 pass, 4 fail`: the 4 failures are upstream's `skills/poteto-mode/scripts/**/*.test.ts`, which import `bun:test` and cannot load in the mod runner. Ignore them; every `hooks/poteto.test.tsx` test must pass.
+
+Run the upstream tests in their own runner as well:
+
+```bash
+cd skills/poteto-mode/scripts
+bun install --no-save
+bun test orch watch-pr
+bun run typecheck
+```
 
 Test-kit rules learned the hard way:
 - Nothing sits beneath the plugin. The test answers every event the mod calls down to: `on('prompt.compose', () => ({ sections: [...] }))`, `on('turn.complete', ($, e) => ({ text: e.answer }))`, `on('agent.spawn', () => ({ model, agentId }))`.
@@ -132,7 +143,7 @@ A new folder shows the workspace trust dialog first: `tmux send-keys -t pt Down 
 
 ## Release
 
-1. Bump `version` in `.claude-plugin/plugin.json` (`0.15.15-cc.N`): users who installed from GitHub only get changes on a new version.
+1. Bump `version` in `.claude-plugin/plugin.json` (`<upstream-version>-cc.N`): users who installed from GitHub only get changes on a new version.
 2. Run steps 1 to 3 of Verify a change; step 5 for any drawing change.
 3. Commit and `git push` to `main`.
 
