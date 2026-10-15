@@ -44,8 +44,8 @@ const parseSteps = (markdown: string) =>
     return text === undefined ? [] : [shortStep(text)]
   })
 
-// Cursor's `mode: true` keeps poteto-mode in context every turn. Claude Code has no
-// sticky skills, so the mod adds the skill's own `reminder` as a system-prompt section.
+// Cursor's `mode: true` kept poteto-mode in context every turn. Claude Code has no
+// sticky skills, so the mod adds upstream's former `reminder` as a system-prompt section.
 const modeSection = (root: string) => ({
   id: 'pstack:poteto-mode',
   scope: 'session' as const,
@@ -55,7 +55,8 @@ const modeSection = (root: string) => ({
     `Applying it means: Read ${root}/skills/poteto-mode/SKILL.md in full, pick a playbook from ${root}/skills/poteto-mode/playbooks/, ` +
       'and open a todo list whose first items are that playbook\'s steps, copied verbatim.',
     `Principle and helper skills live at ${root}/skills/<name>/SKILL.md; read a leaf in full before citing it.`,
-    'Spawn subagents as subagent_type "pstack:poteto-agent" (comment review: "pstack:comment-sicko").',
+    'You run the playbook yourself. Spawn delegates as subagent_type "pstack:poteto-agent" with that SKILL.md path in the prompt, ' +
+      'never to run the playbook (comment review: "pstack:comment-sicko").',
     REPORT,
   ].join('\n'),
 })

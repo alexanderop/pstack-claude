@@ -16,7 +16,7 @@ A Claude Code port of [poteto's pstack](https://github.com/cursor/plugins/tree/m
 | `.claude-plugin/marketplace.json` | Makes this repo a one-plugin marketplace |
 | `.claude-plugin/types/` | Generated API types, gitignored (see Type-check) |
 
-Upstream source and sync scope are recorded in `UPSTREAM.md`. The current port is `0.15.17-cc.1`.
+Upstream source and sync scope are recorded in `UPSTREAM.md`. The current port is `0.15.25-cc.1`.
 
 ## What the port changed from upstream
 
@@ -24,6 +24,7 @@ Keep these when syncing from `cursor/plugins`:
 
 - Names: `AskQuestion` → `AskUserQuestion`, `generalPurpose` → `general-purpose`, agents referenced as `pstack:poteto-agent` / `pstack:comment-sicko`. Agent and skill `name:` fields are kebab-case (`poteto-mode`, `comment-sicko`, `make-bot-ui`).
 - `is_background` removed from `agents/poteto-agent.md` (Cursor-only).
+- `agents/poteto-agent.md` searches `~/.claude/plugins/` (not `~/.cursor/plugins/`) for `poteto-mode/SKILL.md` when its parent passed no path.
 - `disable-model-invocation: true` removed from the router skills (`how`, `why`, `architect`, `arena`, `swarm`, `interrogate`, `unslop`, `no-comments`, `technical-writing`, `tdd`, `benchmark-checklist`, `blast-radius`, `typescript-best-practices`, `show-me-your-work`, `figure-it-out`) so the model can call them. Principles and `poteto-mode` stay user-only; the model reads them by file path.
 - Not ported: Cursor multi-model routing (Grok/Opus), `cursor-team-kit` skills (`deslop`, `control-ui`, `control-cli`, `create-skill`). Text that mentions them is left as upstream wrote it.
 
@@ -78,14 +79,14 @@ The first command loads the plugin from this folder. Check that `.claude-plugin/
 claude plugin test .
 ```
 
-Expect `9 pass, 4 fail`: the 4 failures are upstream's `skills/poteto-mode/scripts/**/*.test.ts`, which import `bun:test` and cannot load in the mod runner. Ignore them; every `hooks/poteto.test.tsx` test must pass.
+Expect `9 pass, 5 fail`: the 5 failures are upstream's `skills/poteto-mode/scripts/**/*.test.ts`, which import `bun:test` and cannot load in the mod runner. Ignore them; every `hooks/poteto.test.tsx` test must pass.
 
 Run the upstream tests in their own runner as well:
 
 ```bash
 cd skills/poteto-mode/scripts
 bun install --no-save
-bun test orch watch-pr
+bun test
 bun run typecheck
 ```
 
